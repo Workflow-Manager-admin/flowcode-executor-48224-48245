@@ -10,21 +10,15 @@ const COLORS = {
 };
 
 // --- UTILITIES ---
-function fetchWithAuth(url, options = {}, token) {
+function fetchApi(url, options = {}) {
   return fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: token ? `Bearer ${token}` : undefined,
       ...options.headers,
     }
   });
 }
-
-// --- AUTH CONTEXT ---
-const AuthContext = React.createContext();
-
-// --- COMPONENTS ---
 
 // PUBLIC_INTERFACE
 function App() {
@@ -34,13 +28,8 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Auth State
-  const [token, setToken] = useState(() => localStorage.getItem('authToken') || "");
-  const [user, setUser] = useState(null);
-  const [authStatus, setAuthStatus] = useState('loading'); // loading | logged_in | none
-
-  // UI Navigation State
-  const [screen, setScreen] = useState(token ? "dashboard" : "login"); // login | register | dashboard
+  // UI State
+  const [screen, setScreen] = useState("dashboard"); // always dashboard now
   const [flows, setFlows] = useState([]); // Sidebar flow list
   const [selectedFlow, setSelectedFlow] = useState(null); // Loaded flow object
   const [nodes, setNodes] = useState([]); // Flow diagram nodes (for editor)
@@ -62,96 +51,15 @@ function App() {
   // Error message for user
   const [errorMsg, setErrorMsg] = useState("");
 
-  // --- Authentication effect (load user info etc) ---
+  // --- Load flows (public) ---
   useEffect(() => {
-    if (!token) {
-      setAuthStatus("none");
-      setUser(null);
-      setScreen("login");
-      return;
-    }
-    setAuthStatus("loading");
-    // Validate the token by making a quick call (e.g., list flows)
-    fetchWithAuth(`${API_BASE}/flows`, {}, token)
-      .then(res => {
-        if (res.ok) return res.json();
-        throw new Error("Token validation failed");
-      })
-      .then(() => {
-        setAuthStatus("logged_in");
-        setScreen("dashboard");
-      })
-      .catch(() => {
-        setAuthStatus("none");
-        setToken("");
-        setUser(null);
-        localStorage.removeItem("authToken");
-        setScreen("login");
-      });
-  }, [token]);
-
-  // --- Load flows on login/dashboard ---
-  useEffect(() => {
-    if (authStatus !== "logged_in") return;
-    fetchWithAuth(`${API_BASE}/flows`, {}, token)
+    fetchApi(`${API_BASE}/flows`, {})
       .then(res => res.ok ? res.json() : [])
       .then(data => { setFlows(data); })
       .catch(() => { setFlows([]); });
-  }, [authStatus, token]);
+  }, []);
 
   // --- HANDLERS ---
-
-  // PUBLIC_INTERFACE
-  function handleLogin(username, password) {
-    setErrorMsg("");
-    fetch(`${API_BASE}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
-    })
-    .then(res => res.ok ? res.json() : res.json().then(e => {throw new Error(e.detail || "Login failed");}))
-    .then(data => {
-      setToken(data.access_token);
-      localStorage.setItem("authToken", data.access_token);
-      setAuthStatus("logged_in");
-      setScreen("dashboard");
-      setErrorMsg("");
-    })
-    .catch(err => setErrorMsg(err.message));
-  }
-
-  // PUBLIC_INTERFACE
-  function handleRegister(username, password) {
-    setErrorMsg("");
-    fetch(`${API_BASE}/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    })
-    .then(res => res.ok ? res.json() : res.json().then(e => {throw new Error(e.detail || "Registration failed");}))
-    .then(data => {
-      setToken(data.access_token);
-      localStorage.setItem("authToken", data.access_token);
-      setAuthStatus("logged_in");
-      setScreen("dashboard");
-      setErrorMsg("");
-    })
-    .catch(err => setErrorMsg(String(err.message || err)));
-  }
-
-  // PUBLIC_INTERFACE
-  function handleLogout() {
-    setToken("");
-    setUser(null);
-    setAuthStatus("none");
-    localStorage.removeItem("authToken");
-    setScreen("login");
-    setFlows([]);
-    setNodes([]);
-    setEdges([]);
-    setSelectedFlow(null);
-    setJsCode("");
-  }
 
   // PUBLIC_INTERFACE
   function handleSelectFlow(flow) {
@@ -177,20 +85,20 @@ function App() {
       return;
     }
     // Update flow
-    fetchWithAuth(`${API_BASE}/flows/${selectedFlow.id}`, {
+    fetchApi(`${API_BASE}/flows/${selectedFlow.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: selectedFlow.title,
         nodes,
         edges
       })
-    }, token)
-      .then(res => res.ok ? res.json() : res.json().then(e => {throw new Error(e.detail || "Save failed");}))
+    })
+      .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || "Save failed"); }))
       .then(flow => {
         setSelectedFlow(flow);
         setErrorMsg("Flow saved!");
         // Refresh flows
-        fetchWithAuth(`${API_BASE}/flows`, {}, token)
+        fetchApi(`${API_BASE}/flows`, {})
           .then(res => res.ok ? res.json() : [])
           .then(data => setFlows(data));
       })
@@ -199,21 +107,21 @@ function App() {
 
   // PUBLIC_INTERFACE
   function handleSaveAsFlow(title) {
-    fetchWithAuth(`${API_BASE}/flows`, {
+    fetchApi(`${API_BASE}/flows`, {
       method: "POST",
       body: JSON.stringify({
         title,
         nodes,
         edges
       })
-    }, token)
-      .then(res => res.ok ? res.json() : res.json().then(e => {throw new Error(e.detail || "Save failed");}))
+    })
+      .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || "Save failed"); }))
       .then(flow => {
         setSelectedFlow(flow);
         setSaveAsModal(false);
         setErrorMsg("Flow created!");
         // Refresh flows
-        fetchWithAuth(`${API_BASE}/flows`, {}, token)
+        fetchApi(`${API_BASE}/flows`, {})
           .then(res => res.ok ? res.json() : [])
           .then(data => setFlows(data));
       })
@@ -224,45 +132,45 @@ function App() {
   function handleDeleteFlow() {
     if (!selectedFlow) return;
     if (!window.confirm("Delete this flow?")) return;
-    fetchWithAuth(`${API_BASE}/flows/${selectedFlow.id}`, {
+    fetchApi(`${API_BASE}/flows/${selectedFlow.id}`, {
       method: "DELETE"
-    }, token)
-    .then(res => res.ok ? null : res.json().then(e => {throw new Error(e.detail || "Delete failed");}))
-    .then(() => {
-      setSelectedFlow(null);
-      setNodes([]);
-      setEdges([]);
-      setJsCode("");
-      setErrorMsg("Flow deleted.");
-      // Refresh flows
-      fetchWithAuth(`${API_BASE}/flows`, {}, token)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setFlows(data));
     })
-    .catch(err => setErrorMsg(String(err.message || err)));
+      .then(res => res.ok ? null : res.json().then(e => { throw new Error(e.detail || "Delete failed"); }))
+      .then(() => {
+        setSelectedFlow(null);
+        setNodes([]);
+        setEdges([]);
+        setJsCode("");
+        setErrorMsg("Flow deleted.");
+        // Refresh flows
+        fetchApi(`${API_BASE}/flows`, {})
+          .then(res => res.ok ? res.json() : [])
+          .then(data => setFlows(data));
+      })
+      .catch(err => setErrorMsg(String(err.message || err)));
   }
 
   // PUBLIC_INTERFACE
   function handleExecuteFlow() {
     if (!selectedFlow) return;
-    fetchWithAuth(`${API_BASE}/execute`, {
+    fetchApi(`${API_BASE}/execute`, {
       method: "POST",
       body: JSON.stringify({
         flow_id: selectedFlow.id,
         inputs: null // Could prompt for input if desired
       })
-    }, token)
-    .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || "Execution failed");}))
-    .then(result => {
-      setExecutionResult(result);
-      setShowResult(true);
     })
-    .catch(err => setErrorMsg(String(err.message || err)));
+      .then(res => res.ok ? res.json() : res.json().then(e => { throw new Error(e.detail || "Execution failed"); }))
+      .then(result => {
+        setExecutionResult(result);
+        setShowResult(true);
+      })
+      .catch(err => setErrorMsg(String(err.message || err)));
   }
 
   // PUBLIC_INTERFACE
   function handleLoadResults() {
-    fetchWithAuth(`${API_BASE}/results`, {}, token)
+    fetchApi(`${API_BASE}/results`, {})
       .then(res => res.ok ? res.json() : [])
       .then(results => {
         setAllResults(results);
@@ -285,7 +193,7 @@ function App() {
       const idx = prevNodes.findIndex(n => n.type === "js");
       if (idx !== -1) {
         const updated = [...prevNodes];
-        updated[idx] = { ...updated[idx], data: { ...updated[idx].data, code: newCode }};
+        updated[idx] = { ...updated[idx], data: { ...updated[idx].data, code: newCode } };
         return updated;
       }
       // Add a new JS node in center
@@ -296,86 +204,64 @@ function App() {
   // --- RENDERING ---
 
   return (
-    <AuthContext.Provider value={{ token, user, authStatus, setToken, setUser }}>
-      {/* Top navigation bar */}
-      <div style={{
-        width: "100vw",
-        height: "100vh",
-        background: COLORS.secondary,
-        color: COLORS.primary,
-        fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-        display: "flex",
-        flexDirection: "column",
-        minHeight: "100vh",
-      }}>
-        <Navbar
-          theme={theme}
-          setTheme={setTheme}
-          onLogout={authStatus === "logged_in" ? handleLogout : undefined}
-          onResults={authStatus === "logged_in" ? handleLoadResults : undefined}
-          screen={screen}
-          setScreen={setScreen}
+    <div style={{
+      width: "100vw",
+      height: "100vh",
+      background: COLORS.secondary,
+      color: COLORS.primary,
+      fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+      display: "flex",
+      flexDirection: "column",
+      minHeight: "100vh",
+    }}>
+      <Navbar
+        theme={theme}
+        setTheme={setTheme}
+        onResults={handleLoadResults}
+      />
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <DashboardLayout
+          flows={flows}
+          onSelectFlow={handleSelectFlow}
+          onNewFlow={handleNewFlow}
+          selectedFlow={selectedFlow}
+          nodes={nodes}
+          setNodes={setNodes}
+          edges={edges}
+          setEdges={setEdges}
+          jsCode={jsCode}
+          setJsCode={handleCodeChange}
+          onSaveFlow={handleSaveFlow}
+          onDeleteFlow={handleDeleteFlow}
+          onExecuteFlow={handleExecuteFlow}
+          errorMsg={errorMsg}
+          setErrorMsg={setErrorMsg}
         />
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          {authStatus === "loading" ? (
-            <LoadingScreen />
-          ) : screen === "login" ? (
-            <LoginForm
-              onLogin={handleLogin}
-              onSwitchToRegister={() => { setScreen("register"); setErrorMsg(""); }}
-              errorMsg={errorMsg}
-            />
-          ) : screen === "register" ? (
-            <RegisterForm
-              onRegister={handleRegister}
-              onSwitchToLogin={() => { setScreen("login"); setErrorMsg(""); }}
-              errorMsg={errorMsg}
-            />
-          ) : (
-            <DashboardLayout
-              flows={flows}
-              onSelectFlow={handleSelectFlow}
-              onNewFlow={handleNewFlow}
-              selectedFlow={selectedFlow}
-              nodes={nodes}
-              setNodes={setNodes}
-              edges={edges}
-              setEdges={setEdges}
-              jsCode={jsCode}
-              setJsCode={handleCodeChange}
-              onSaveFlow={handleSaveFlow}
-              onDeleteFlow={handleDeleteFlow}
-              onExecuteFlow={handleExecuteFlow}
-              errorMsg={errorMsg}
-              setErrorMsg={setErrorMsg}
-            />
-          )}
-        </div>
-        {/* Modals */}
-        {showResult && (
-          <ResultModal result={executionResult} onClose={() => setShowResult(false)} />
-        )}
-        {saveAsModal && (
-          <SaveAsModal
-            onCancel={() => setSaveAsModal(false)}
-            onSave={handleSaveAsFlow}
-            saveTitle={saveTitle}
-            setSaveTitle={setSaveTitle}
-          />
-        )}
-        {resultsModal && (
-          <ResultsHistoryModal
-            results={allResults}
-            onClose={() => setResultsModal(false)}
-          />
-        )}
       </div>
-    </AuthContext.Provider>
+      {/* Modals */}
+      {showResult && (
+        <ResultModal result={executionResult} onClose={() => setShowResult(false)} />
+      )}
+      {saveAsModal && (
+        <SaveAsModal
+          onCancel={() => setSaveAsModal(false)}
+          onSave={handleSaveAsFlow}
+          saveTitle={saveTitle}
+          setSaveTitle={setSaveTitle}
+        />
+      )}
+      {resultsModal && (
+        <ResultsHistoryModal
+          results={allResults}
+          onClose={() => setResultsModal(false)}
+        />
+      )}
+    </div>
   );
 }
 
 // --- NAVBAR ---
-function Navbar({ theme, setTheme, onLogout, onResults, screen, setScreen }) {
+function Navbar({ theme, setTheme, onResults }) {
   return (
     <nav style={{
       background: COLORS.primary,
@@ -393,18 +279,10 @@ function Navbar({ theme, setTheme, onLogout, onResults, screen, setScreen }) {
         <span style={{ background: COLORS.accent, color: COLORS.primary, borderRadius: 4, fontSize: 14, padding: "2px 5px", fontWeight: 700, marginLeft: 4 }}>EXEC</span>
       </span>
       <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-        {(onResults && screen === "dashboard") && (
+        {onResults && (
           <button style={navBtnStyle} onClick={onResults}>Execution Results</button>
         )}
         <ThemeToggle theme={theme} setTheme={setTheme} />
-        {onLogout
-          ? <button style={logoutBtnStyle} onClick={onLogout}>Logout</button>
-          : screen === "login"
-            ? <button style={navBtnStyle} onClick={() => setScreen("register")}>Register</button>
-            : screen === "register"
-              ? <button style={navBtnStyle} onClick={() => setScreen("login")}>Login</button>
-              : null
-        }
       </div>
     </nav>
   );
@@ -432,62 +310,6 @@ const navBtnStyle = {
   padding: "8px 16px",
   cursor: "pointer",
   transition: "background 0.2s"
-};
-const logoutBtnStyle = { ...navBtnStyle, background: COLORS.accent, color: COLORS.primary };
-
-// --- AUTH FORMS ---
-function LoginForm({ onLogin, onSwitchToRegister, errorMsg }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  return (
-    <div style={{ margin: "auto", width: "100%", maxWidth: 360, background: "#fff", borderRadius: 8, padding: 32, boxShadow: "0 2px 8px #d3dbee22", minHeight: 350, display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <h2 style={{ color: COLORS.primary, marginBottom: 24 }}>Sign in</h2>
-      <input type="text" autoFocus placeholder="Username"
-        value={username} onChange={e => setUsername(e.target.value)}
-        style={authInputStyle} />
-      <input type="password" placeholder="Password"
-        value={password} onChange={e => setPassword(e.target.value)}
-        style={authInputStyle} />
-      <button onClick={() => onLogin(username, password)} style={{ ...navBtnStyle, width: "100%", marginTop: 12 }}>Login</button>
-      <span style={{ fontSize: 13, marginTop: 22 }}>
-        No account? <button onClick={onSwitchToRegister} style={{ color: COLORS.primary, background: "none", border: 0, padding: 0, cursor: "pointer" }}>Register</button>
-      </span>
-      {errorMsg && <p style={{ color: "crimson", marginTop: 14 }}>{errorMsg}</p>}
-    </div>
-  );
-}
-
-function RegisterForm({ onRegister, onSwitchToLogin, errorMsg }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  return (
-    <div style={{ margin: "auto", width: "100%", maxWidth: 360, background: "#fff", borderRadius: 8, padding: 32, boxShadow: "0 2px 8px #d3dbee22", minHeight: 350, display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <h2 style={{ color: COLORS.primary, marginBottom: 24 }}>Register</h2>
-      <input type="text" autoFocus placeholder="Username"
-        value={username} onChange={e => setUsername(e.target.value)}
-        style={authInputStyle} />
-      <input type="password" placeholder="Password"
-        value={password} onChange={e => setPassword(e.target.value)}
-        style={authInputStyle} />
-      <button onClick={() => onRegister(username, password)} style={{ ...navBtnStyle, width: "100%", marginTop: 12 }}>Create Account</button>
-      <span style={{ fontSize: 13, marginTop: 22 }}>
-        Already have an account? <button onClick={onSwitchToLogin} style={{ color: COLORS.primary, background: "none", border: 0, padding: 0, cursor: "pointer" }}>Login</button>
-      </span>
-      {errorMsg && <p style={{ color: "crimson", marginTop: 14 }}>{errorMsg}</p>}
-    </div>
-  );
-}
-
-const authInputStyle = {
-  width: "100%",
-  marginTop: 8,
-  marginBottom: 8,
-  padding: 10,
-  fontSize: 15,
-  border: `1.5px solid ${COLORS.primary}33`,
-  borderRadius: 5,
-  outline: "none",
-  background: "#fafbfc"
 };
 
 // --- DASHBOARD LAYOUT ---
@@ -762,7 +584,7 @@ function SaveAsModal({ onCancel, onSave, saveTitle, setSaveTitle }) {
           placeholder="Flow Title"
           value={saveTitle}
           onChange={e => setSaveTitle(e.target.value)}
-          style={{ ...authInputStyle, width: "88%", marginBottom: 16 }}
+          style={{ width: "88%", marginBottom: 16, padding: 10, fontSize: 15, border: `1.5px solid ${COLORS.primary}33`, borderRadius: 5, outline: "none", background: "#fafbfc" }}
           autoFocus
         />
         <div style={{ display: "flex", gap: 30 }}>
@@ -823,18 +645,6 @@ function ResultsHistoryModal({ results, onClose }) {
         ))}
         <button style={{ ...navBtnStyle, background: COLORS.primary, color: "#fff", minWidth: 110, marginTop: 22, alignSelf: "center" }} onClick={onClose}>Close</button>
       </div>
-    </div>
-  );
-}
-
-// --- LOADING SCREEN ---
-function LoadingScreen() {
-  return (
-    <div style={{
-      width: "100vw", minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center",
-      fontWeight: 600, fontSize: 21, color: COLORS.primary
-    }}>
-      Loading...
     </div>
   );
 }
